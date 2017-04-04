@@ -1,0 +1,8 @@
+{
+  "name": "voterollcall",
+  "version": "",
+  "description": "Pulling votes from ProPublica",
+  "dependencies": {
+    "request": "^2.81.0"
+  }
+}
