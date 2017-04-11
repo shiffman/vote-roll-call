@@ -3,6 +3,8 @@
   "version": "",
   "description": "Pulling votes from ProPublica",
   "dependencies": {
-    "request": "^2.81.0"
+    "google-spreadsheet": "^2.0.3",
+    "request": "^2.81.0",
+    "sheetsu-node": "0.0.5"
   }
 }
