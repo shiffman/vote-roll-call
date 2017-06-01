@@ -1,81 +1,121 @@
+var sheetsu = require('sheetsu-node');
+var request = require('request');
+
 var config = require('./config');
-//console.log(config);
 
-// Currently not working
-// var sheetsu = require('sheetsu-node');
-// var config = {
-//   address: 'ADDRESS',
-//   api_key: 'keys',
-//   api_secret: 'SECRET',
-// };
+// Create new client
+var sheetsu_client = sheetsu(config.sheetsu);
 
-var GoogleSpreadsheet = require('google-spreadsheet');
-
-// For now public spreadsheet at:
-// https://docs.google.com/spreadsheets/d/1oWAFQIIRZneiAQAXRvJ1S4K_Lall0DY_A8WGIVawXpc/edit#gid=0
-var doc = new GoogleSpreadsheet('1oWAFQIIRZneiAQAXRvJ1S4K_Lall0DY_A8WGIVawXpc');
-
-// Lookup table for spreadsheet columns
-// hardcoding for now
-var columns = {
-  'date': 0,
-  'roll_call_number': 1,
-  'bill_number': 2,
-  'summary': 3
+var params = {
+  limit: 100,
+  offset: 1,
+  sheet: 'votes'
+  // search
 }
+sheetsu_client.read(params).then(gotSheet, error);
 
-doc.getInfo(function(err, info) {
-  var sheet = info.worksheets[0];
+var votesArray = [];
 
-  // This is an annoying way to do this, parsing all the cells
-  // Should probably use getRows(), have to investigate this more
-  sheet.getCells({
-    // Start one below the header
-    'min-row': 2,
-    // Look at 1000 for no good reason
-    'max-row': 10,
-    'min-col': 1,
-    'max-col': 1,
-    'return-empty': true
-  }, function(err, cells) {
-    var row = -1;
-    for (var i = 0; i < cells.length; i++) {
-      var cell = cells[i];
-      if (cells.row != row) {
-        row = cell.row;
-        var content = cell.value;
-        // New empty row!
-        if (content.length == 0) {
-          cell.value = 'test';
+
+function gotSheet(data) {
+  var votesArray = JSON.parse(data);
+
+  // For debugging
+  // var fs = require('fs');
+  // var json = JSON.stringify(votesArray, null, 2);
+  // fs.writeFileSync("sheet.json", json);
+
+
+  // Got everything in the spreadsheet
+  var votesTable = {};
+  console.log('Got ' + votesArray.length + ' rows from sheet.');
+  for (var i = 0; i < votesArray.length; i++) {
+    var vote = votesArray[i];
+    votesTable[vote.roll_call_number] = true;
+  }
+
+  // Now go to Propublica
+  // ProPublica API
+  // Documentation for this API:
+  // https://propublica.github.io/congress-api-docs/#get-votes-by-type
+
+  // "https://api.propublica.org/congress/v1/"+chamber+"/votes/"+startDate+"/"+endDate+".json",
+  var startDate = getToday(10);
+  var endDate = getToday(0);
+  var options = {
+    url: 'https://api.propublica.org/congress/v1/senate/votes/' + startDate + '/' + endDate + '.json',
+    headers: {
+      'X-API-Key': config.propublica
+    }
+  };
+
+  function gotVotes(error, response, body) {
+    if (!error && response.statusCode == 200) {
+      var info = JSON.parse(body);
+
+      // for debugging
+      // var fs = require('fs');
+      // var json = JSON.stringify(info, null, 2);
+      // fs.writeFileSync("votes.json", json);
+
+
+      var votes = info.results.votes;
+      var rows = [];
+      console.log('Got ' + votes.length + ' votes from ProPublica.');
+      for (var i = 0; i < votes.length; i++) {
+        var vote = votes[i];
+        var roll_call = vote.roll_call;
+
+        // New vote!
+        if (votesTable[roll_call]) {
+          console.log('Already know about roll call: ' + roll_call);
+        } else {
+          console.log('Adding new roll call: ' + roll_call);
+          // Add a new row
+          var row = {
+            date: vote.date,
+            roll_call_number: vote.roll_call,
+            bill_number: '????',
+            summary: vote.description
+          }
+          rows.push(row);
         }
-        console.log('new row! ' +  row);
+      }
+
+      // Add all the rows at once:
+      if (rows.length > 0) {
+        sheetsu_client.create(rows, "votes").then(finishedAdding, error)
+
+        function finishedAdding(data) {
+          console.log("Success adding: ");
+          console.log(data);
+        }
+      } else {
+        console.log('no new votes to add');
       }
     }
-    // Ooops, have to authenticate to add content
-    // sheet.bulkUpdateCells(cells, err); //async
-    // function err(oops) {
-    //   console.log(oops);
-    // }
-  });
-});
+  }
 
+  request(options, gotVotes);
 
-// ProPublica API
-// Documentation for this API:
-// https://propublica.github.io/congress-api-docs/#get-votes-by-type
+}
 
-// var options = {
-//   url: 'https://api.propublica.org/congress/v1/senate/votes/2017/01.json',
-//   headers: {
-//     'X-API-Key': config.propublica
-//   }
-// };
-//
-// function gotData(error, response, body) {
-//   if (!error && response.statusCode == 200) {
-//     var info = JSON.parse(body);
-//     console.log(info);
-//   }
-// }
-//
-// request(options, gotData);
+function error(err) {
+  console.log(err);
+}
+
+// Get Today
+function getToday(offset) {
+  var today = new Date();
+  today.setDate(today.getDate() - offset);
+  var dd = today.getDate();
+  var mm = today.getMonth() + 1;
+  var yyyy = today.getFullYear();
+  if (dd < 10) {
+    dd = '0' + dd;
+  }
+  if (mm < 10) {
+    mm = '0' + mm;
+  }
+  return today = yyyy + '-' + mm + '-' + dd;
+}
